@@ -8,8 +8,6 @@ arca-shell/node_modules/
 arca-shell/android/
 arca-shell/ios/
 arca-shell/.expo/
-arca-shell/google-services.json
-arca-shell/GoogleService-Info.plist
 
 *.jks
 *.keystore
