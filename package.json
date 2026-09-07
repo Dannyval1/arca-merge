@@ -1,0 +1,20 @@
+{
+  "name": "arca-merge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Juego merge con temática del Arca - prototipo FDS 1",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "phaser": "3.90.0",
+    "react-native-google-mobile-ads": "16.3.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
+  }
+}

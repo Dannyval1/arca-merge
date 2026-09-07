@@ -1,0 +1,87 @@
+{
+  "expo": {
+    "name": "Arca Merge",
+    "slug": "arca-shell",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "backgroundColor": "#1b2a41",
+    "locales": {
+      "es": "./locales/es.json",
+      "en": "./locales/en.json",
+      "pt": "./locales/pt.json"
+    },
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1b2a41"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.arcamerge.app",
+      "infoPlist": {
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "NSUserTrackingUsageDescription": "Esto nos permite mostrarte anuncios más relevantes y mantener el juego gratuito."
+      }
+    },
+    "android": {
+      "package": "com.arcamerge.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1b2a41"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "com.android.vending.BILLING"
+      ],
+      "usesCleartextTraffic": true
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-asset",
+      "expo-tracking-transparency",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#1b2a41"
+        }
+      ],
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT"
+        }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-4782245353460263~4297683630",
+          "iosAppId": "ca-app-pub-4782245353460263~9993592395",
+          "userTrackingUsageDescription": "Esto nos permite mostrarte anuncios más relevantes y mantener el juego gratuito."
+        }
+      ],
+      "./plugins/withPinnedPlayServicesAds",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraProguardRules": "-keep class com.google.android.gms.internal.consent_sdk.** { *; }"
+          }
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
