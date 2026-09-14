@@ -80,6 +80,10 @@ export class ShopModal {
   private readonly olivesText: Phaser.GameObjects.Text;
   private readonly restoreLabel: Phaser.GameObjects.Text;
   private readonly statusText: Phaser.GameObjects.Text;
+  private confirmRoot!: Phaser.GameObjects.Container;
+  private confirmTitle!: Phaser.GameObjects.Text;
+  private confirmBody!: Phaser.GameObjects.Text;
+  private confirmYesLabel!: Phaser.GameObjects.Text;
   private readonly packs: PackCard[] = [];
   private readonly panelX: number;
   private readonly panelY: number;
@@ -213,7 +217,7 @@ export class ShopModal {
       adsCenter,
       S.ads.btnW,
       S.ads.btnH,
-      () => void this.buyRemoveAds(),
+      () => this.showRemoveAdsConfirm(),
       this.adsRoot
     );
     this.panel.add(this.adsRoot);
@@ -261,6 +265,7 @@ export class ShopModal {
     this.panel.add(this.statusText);
 
     this.root.add([dim, this.panel]);
+    this.buildRemoveAdsConfirm(scene);
     this.relabel();
   }
 
@@ -295,6 +300,7 @@ export class ShopModal {
   close(): void {
     this.root.setVisible(false);
     this.busy = false;
+    this.hideRemoveAdsConfirm();
     this.unsubCatalog?.();
     this.unsubCatalog = null;
   }
@@ -302,6 +308,93 @@ export class ShopModal {
   destroy(): void {
     this.unsubCatalog?.();
     this.root.destroy(true);
+  }
+
+  private buildRemoveAdsConfirm(scene: Phaser.Scene): void {
+    this.confirmRoot = scene.add.container(0, 0).setVisible(false).setDepth(1);
+    const dim = scene.add
+      .rectangle(195, 422, 2000, 3000, 0x0d1626, 0.75)
+      .setInteractive();
+    const box = scene.add
+      .rectangle(195, 400, 300, 268, 0xfff6e8, 1)
+      .setStrokeStyle(3, 0x5a4030);
+    this.confirmTitle = scene.add
+      .text(195, 300, "", this.bodyStyle(15, "#5a3010", true))
+      .setOrigin(0.5)
+      .setWordWrapWidth(260);
+    this.confirmBody = scene.add
+      .text(195, 370, "", {
+        ...this.bodyStyle(12, "#5a4030"),
+        align: "center",
+        wordWrap: { width: 260 }
+      })
+      .setOrigin(0.5);
+    const noBtn = scene.add
+      .image(130, 488, "btn_beige")
+      .setDisplaySize(108, 36)
+      .setInteractive({ useHandCursor: true });
+    const noLabel = scene.add
+      .text(130, 488, "", this.bodyStyle(12, "#5a3010", true))
+      .setOrigin(0.5)
+      .setName("removeAdsConfirmNo");
+    noBtn.on("pointerup", () => {
+      uiTap();
+      this.hideRemoveAdsConfirm();
+    });
+    const yesBtn = scene.add
+      .image(260, 488, "btn_green")
+      .setDisplaySize(108, 36)
+      .setInteractive({ useHandCursor: true });
+    this.confirmYesLabel = scene.add
+      .text(260, 488, "", this.bodyStyle(12, "#fff8f0", true))
+      .setOrigin(0.5);
+    yesBtn.on("pointerup", () => {
+      uiTap();
+      this.hideRemoveAdsConfirm();
+      void this.buyRemoveAds();
+    });
+    this.confirmRoot.add([
+      dim,
+      box,
+      this.confirmTitle,
+      this.confirmBody,
+      noBtn,
+      noLabel,
+      yesBtn,
+      this.confirmYesLabel
+    ]);
+    this.root.add(this.confirmRoot);
+  }
+
+  private showRemoveAdsConfirm(): void {
+    if (this.busy || hasAdsRemoved() || !this.adsBuy.enabled) return;
+    uiTap();
+    this.confirmTitle.setText(
+      t({
+        es: "¿Quitar anuncios?",
+        en: "Remove ads?",
+        pt: "Remover anúncios?"
+      })
+    );
+    this.confirmBody.setText(
+      t({
+        es: "Se quitarán el banner, el anuncio a mitad de partida y el anuncio al perder.\n\nLos anuncios con recompensa (video a cambio de olivos, poderes o una segunda oportunidad) seguirán disponibles si tú los eliges.",
+        en: "This removes the banner, the mid-run ad, and the ad when you lose.\n\nRewarded ads (a video for olives, powers, or a second chance) stay available if you choose them.",
+        pt: "Isso remove o banner, o anúncio no meio da partida e o anúncio ao perder.\n\nAnúncios com recompensa (vídeo por azeitonas, poderes ou uma segunda chance) continuam disponíveis se você escolher."
+      })
+    );
+    this.confirmYesLabel.setText(
+      t({ es: "CONTINUAR", en: "CONTINUE", pt: "CONTINUAR" })
+    );
+    const noLabel = this.confirmRoot.getByName("removeAdsConfirmNo") as
+      | Phaser.GameObjects.Text
+      | null;
+    noLabel?.setText(t({ es: "CANCELAR", en: "CANCEL", pt: "CANCELAR" }));
+    this.confirmRoot.setVisible(true);
+  }
+
+  private hideRemoveAdsConfirm(): void {
+    this.confirmRoot?.setVisible(false);
   }
 
   private async restorePurchases(): Promise<void> {
@@ -482,9 +575,9 @@ export class ShopModal {
     );
     this.adsSub.setText(
       t({
-        es: "Disfruta el Arca sin anuncios",
-        en: "Enjoy the Ark ad-free",
-        pt: "Aproveite a Arca sem anúncios"
+        es: "Sin banner ni anuncios en partida",
+        en: "No banner or in-run ads",
+        pt: "Sem banner nem anúncios na partida"
       })
     );
     this.restoreLabel.setText(

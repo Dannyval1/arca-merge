@@ -1,3 +1,5 @@
 {
-  "NSUserTrackingUsageDescription": "Esto nos permite mostrarte anuncios más relevantes y mantener el juego gratuito."
+  "ios": {
+    "NSUserTrackingUsageDescription": "Esto nos permite mostrarte anuncios más relevantes y mantener el juego gratuito."
+  }
 }

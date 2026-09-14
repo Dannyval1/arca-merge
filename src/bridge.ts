@@ -95,8 +95,10 @@ declare global {
 }
 
 export const BRIDGE_REQUEST_TIMEOUT_MS = 45_000;
-/** Rewarded: AdMob preloaded suele salir en 2–5s; 12s cubre un primer fetch lento sin parecer cuelgue. */
-export const BRIDGE_REWARDED_TIMEOUT_MS = 12_000;
+/** Rewarded real suele durar 15–60s; 12s cortaba el grant y reanudaba la música a mitad del anuncio. */
+export const BRIDGE_REWARDED_TIMEOUT_MS = 120_000;
+/** Mid-run: si el ad no abre, no dejar el tablero congelado 2 minutos. */
+export const BRIDGE_INTERSTITIAL_TIMEOUT_MS = 20_000;
 /** true = 3-2-1 en el juego, sin AdMob. Poner en false al cablear el rewarded real. */
 export const STUB_REWARDED_ADS = false;
 /** true = el botón AD del modal de poder usa el 3-2-1 (sin AdMob). Diario / Continuar siguen reales. */
@@ -111,6 +113,11 @@ export type BridgeOutEvent =
       isNewBest?: boolean;
       olivesEarned?: number;
       durationSec?: number;
+      /**
+       * false = TERMINAR en el modal de continue (ya rechazó rewarded).
+       * true / omitido = 2ª muerte → intersticial antes del modal GO.
+       */
+      showInterstitial?: boolean;
     }
   | { type: "game_start" }
   /** Home ya pintó; el shell puede ocultar el splash nativo. */
@@ -131,6 +138,10 @@ export type BridgeOutEvent =
   | { type: "open_url"; url: string }
   | { type: "restore_purchases"; requestId: string }
   | { type: "request_rewarded_ad"; requestId: string; powerId: string }
+  /** Intersticial a mitad de partida (u otro placement). */
+  | { type: "request_interstitial"; requestId: string; placement: string }
+  /** Abrir hoja nativa de compartir (recomendación + link tienda). */
+  | { type: "request_share"; requestId: string; message: string }
   | { type: "purchase_olives"; requestId: string; packageId: string }
   | { type: "request_shop_catalog" }
   | { type: "power_used"; powerId: string }
@@ -172,6 +183,16 @@ export type BridgeInEvent =
   | { type: "app_foreground" }
   | { type: "shell_info"; platform: "ios" | "android" | "web"; privacyOptionsRequired?: boolean }
   | { type: "game_over_ads_done" }
+  | {
+      type: "interstitial_ad_result";
+      requestId: string;
+      status: "shown" | "skipped" | "error";
+    }
+  | {
+      type: "share_result";
+      requestId: string;
+      status: "shared" | "dismissed" | "unavailable" | "error";
+    }
   | { type: "connectivity"; online: boolean };
 
 export type AppLifecycleType = "app_background" | "app_foreground";
@@ -224,23 +245,47 @@ export function consumeRewardedReason(): "daily_cap" | undefined {
   return r;
 }
 
-const GAME_OVER_ADS_TIMEOUT_MS = 8_000;
+const GAME_OVER_ADS_TIMEOUT_MS = 25_000;
 
 /** El juego espera esto ANTES de pintar el modal de resultado. */
 export function waitForGameOverAdsDone(): Promise<void> {
   if (!isInWebView()) return Promise.resolve();
   pauseAdAudio();
   return new Promise<void>((resolve) => {
-    if (gameOverAdsWaiter) gameOverAdsWaiter();
-    const timer = setTimeout(() => {
-      gameOverAdsWaiter = null;
-      resolve();
-    }, GAME_OVER_ADS_TIMEOUT_MS);
-    gameOverAdsWaiter = () => {
+    let settled = false;
+    let sawBackground = false;
+    let unsubLifecycle = (): void => undefined;
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      unsubLifecycle();
       gameOverAdsWaiter = null;
       resolve();
     };
+
+    // Si había un waiter previo (GO raro doble), liberarlo.
+    if (gameOverAdsWaiter) gameOverAdsWaiter();
+
+    const timer = setTimeout(() => {
+      console.warn("[bridge] game_over_ads_done timeout");
+      finish();
+    }, GAME_OVER_ADS_TIMEOUT_MS);
+
+    // Si el inject se pierde tras el intersticial, el foreground
+    // (ad cerrado) desbloquea el modal sin esperar el timeout.
+    unsubLifecycle = onAppLifecycle((type) => {
+      if (type === "app_background") {
+        sawBackground = true;
+        return;
+      }
+      if (type === "app_foreground" && sawBackground) {
+        setTimeout(finish, 350);
+      }
+    });
+
+    gameOverAdsWaiter = finish;
   }).finally(() => resumeAdAudio());
 }
 
@@ -355,6 +400,14 @@ function handleIncoming(raw: unknown): void {
     finishGameOverAdsWait();
     return;
   }
+  if (event.type === "interstitial_ad_result") {
+    settleRequest(event.requestId, event.status);
+    return;
+  }
+  if (event.type === "share_result") {
+    settleRequest(event.requestId, event.status);
+    return;
+  }
   if (event.type === "purchase_olives_result") {
     settleRequest(event.requestId, {
       status: event.status,
@@ -442,6 +495,51 @@ export function requestRewardedAd(powerId: string): Promise<RewardedAdStatus> {
     "unavailable",
     BRIDGE_REWARDED_TIMEOUT_MS
   ).finally(() => resumeAdAudio());
+}
+
+export type InterstitialAdStatus = "shown" | "skipped" | "error";
+
+/**
+ * Intersticial a mitad de partida (u otro placement). Stub de navegador = skipped.
+ */
+export function requestInterstitialAd(
+  placement: string,
+  timeoutMs = BRIDGE_INTERSTITIAL_TIMEOUT_MS
+): Promise<InterstitialAdStatus> {
+  if (!isNetworkOnline()) {
+    return Promise.resolve("skipped");
+  }
+  const requestId = nextRequestId("int");
+  pauseAdAudio();
+  return enqueueRequest<InterstitialAdStatus>(
+    requestId,
+    () => sendToShell({ type: "request_interstitial", requestId, placement }),
+    () => {
+      console.log(`[bridge stub] interstitial placement=${placement} → skipped`);
+      return "skipped";
+    },
+    "skipped",
+    timeoutMs
+  ).finally(() => resumeAdAudio());
+}
+
+export type ShareStatus = "shared" | "dismissed" | "unavailable" | "error";
+
+/**
+ * Hoja nativa de compartir. En navegador: stub shared.
+ */
+export function requestShare(message: string): Promise<ShareStatus> {
+  const requestId = nextRequestId("share");
+  return enqueueRequest<ShareStatus>(
+    requestId,
+    () => sendToShell({ type: "request_share", requestId, message }),
+    () => {
+      console.log("[bridge stub] share → shared");
+      return "shared";
+    },
+    "unavailable",
+    BRIDGE_REQUEST_TIMEOUT_MS
+  );
 }
 
 export type PurchaseResult = {

@@ -1,14 +1,18 @@
 import Phaser from "phaser";
 import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from "../layout";
-import { BALOO_BITMAP_KEY } from "../fonts";
+import { BALOO_BITMAP_KEY, NUNITO_FAMILY } from "../fonts";
 import { HUD_LAYOUT } from "./hudLayout";
 
 /**
- * Stub de rewarded ad: dim + número grande 3-2-1, luego resuelve.
- * Sustituir por AdMob cuando el shell esté cableado.
+ * Contador a pantalla completa antes de un intersticial / stub rewarded.
+ * Opcionalmente muestra un mensaje ("Anuncio en…").
  */
 export class AdCountdown {
-  static play(scene: Phaser.Scene, seconds = 3): Promise<void> {
+  static play(
+    scene: Phaser.Scene,
+    seconds = 3,
+    message?: string
+  ): Promise<void> {
     const L = HUD_LAYOUT.adCountdown;
     return new Promise((resolve) => {
       const cx = LOGICAL_WIDTH / 2;
@@ -17,8 +21,21 @@ export class AdCountdown {
         .rectangle(cx, cy, 2000, 3000, 0x08060a, L.dimAlpha)
         .setDepth(L.depth)
         .setInteractive();
+      const label = message
+        ? scene.add
+            .text(cx, cy - 110, message, {
+              fontFamily: NUNITO_FAMILY,
+              fontSize: "22px",
+              color: "#fff6e8",
+              fontStyle: "bold",
+              align: "center",
+              wordWrap: { width: 320 }
+            })
+            .setOrigin(0.5)
+            .setDepth(L.depth + 1)
+        : null;
       const num = scene.add
-        .bitmapText(cx, cy, BALOO_BITMAP_KEY, String(seconds), L.fontSize)
+        .bitmapText(cx, cy + (message ? 12 : 0), BALOO_BITMAP_KEY, String(seconds), L.fontSize)
         .setOrigin(0.5)
         .setTint(0xfff6e8)
         .setDepth(L.depth + 1);
@@ -42,6 +59,7 @@ export class AdCountdown {
           left -= 1;
           if (left <= 0) {
             dim.destroy();
+            label?.destroy();
             num.destroy();
             resolve();
             return;

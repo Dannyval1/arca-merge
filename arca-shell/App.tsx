@@ -16,15 +16,19 @@ type Boot = {
 };
 
 /** Tiempo extra tras game_ready para que Home pinte debajo del loader. */
-const HOLD_AFTER_READY_MS = 1100;
+const HOLD_AFTER_READY_MS = 600;
 /** Fade del loader → Home (sin flash azul). */
-const FADE_OUT_MS = 420;
+const FADE_OUT_MS = 320;
 
 /**
  * Flujo de arranque:
- * 1) Splash nativo (logo + #1b2a41)
+ * 1) Splash nativo (logo estático) → se oculta enseguida
  * 2) BootLoader (zoom + Cargando…) mientras storage/UMP/WebView cargan
  * 3) Tras game_ready: hold breve + fade → Home
+ *
+ * IMPORTANTE: los callbacks a GameWebView deben ser estables (useCallback).
+ * Si cambian de identidad, el effect de boot del WebView se re-ejecuta,
+ * para el servidor estático y recarga Phaser → vuelve a Home a mitad de partida.
  */
 export default function App() {
   const [boot, setBoot] = useState<Boot | null>(null);
@@ -53,7 +57,6 @@ export default function App() {
         return;
       }
 
-      // Hold: el WebView/Phaser termina de pintar Home bajo el loader.
       holdTimer.current = setTimeout(() => {
         holdTimer.current = null;
         Animated.timing(loaderOpacity, {
@@ -69,8 +72,17 @@ export default function App() {
     [finishHide, loaderOpacity]
   );
 
+  const onGameReady = useCallback(() => {
+    dismissLoader("game_ready");
+  }, [dismissLoader]);
+
+  const onBootFailed = useCallback(() => {
+    dismissLoader("boot_failed", { immediate: true });
+  }, [dismissLoader]);
+
   useEffect(() => {
     armSplashSafetyTimeout();
+    void hideNativeSplash("bootloader");
     const t = setTimeout(
       () => dismissLoader("timeout-20s", { immediate: true }),
       20_000
@@ -108,8 +120,8 @@ export default function App() {
             storageSnapshot={boot.snapshot}
             canRequestAds={boot.canRequestAds}
             privacyOptionsRequired={boot.privacyOptionsRequired}
-            onGameReady={() => dismissLoader("game_ready")}
-            onBootFailed={() => dismissLoader("boot_failed", { immediate: true })}
+            onGameReady={onGameReady}
+            onBootFailed={onBootFailed}
           />
         ) : null}
         {showLoader ? <BootLoader opacity={loaderOpacity} /> : null}

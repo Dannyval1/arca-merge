@@ -11,8 +11,11 @@ export async function startGameServer(fileDir: string): Promise<string> {
   await stopGameServer();
 
   const t0 = Date.now();
+  const cleanPath = fileDir.startsWith("file://")
+    ? fileDir.replace("file://", "")
+    : fileDir;
   server = new Server({
-    fileDir,
+    fileDir: cleanPath,
     port: SHELL_CONFIG.staticServerPort,
     stopInBackground: SHELL_CONFIG.stopServerInBackground,
     hostname: "127.0.0.1"
@@ -44,5 +47,10 @@ export async function ensureServerRunning(fileDir: string): Promise<string> {
       // cae a recreate
     }
   }
+  // Nuevo puerto: el WebView seguiría en el origen viejo. Mejor fallar
+  // ruidoso que recrear en silencio (recargar a Home a mitad de partida).
+  console.warn(
+    "[arca-shell] static server dead; recreate may desync WebView origin"
+  );
   return startGameServer(fileDir);
 }

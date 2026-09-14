@@ -130,14 +130,14 @@ export const HUD_LAYOUT = {
     /** Escala base al armar / seleccionar (tick añade vibración). */
     selectedScale: 1.18,
     /**
-     * Estado “apagado” (no usable): opacidad completa + tint desaturado/oscuro.
-     * Ajustar aquí sin tocar código. Funciona también en iconos claros (Cuervo).
+     * Estado “apagado” (no usable): textura gris bakeada (Canvas no aplica setTint).
+     * Ajustar desaturate/darken aquí; se regenera al reiniciar partida.
      */
     disabled: {
-      /** 0 = color pleno, 1 = gris total (vía tint multiply). */
-      desaturate: 0.55,
+      /** 0 = color pleno, 1 = gris total. */
+      desaturate: 0.92,
       /** 0 = sin oscurecer, 1 = muy oscuro. */
-      darken: 0.42
+      darken: 0.38
     },
     usesFont: 9,
     costFont: 8,
@@ -361,7 +361,8 @@ export const HUD_LAYOUT = {
       w: 124,
       h: 44,
       fontSize: 18,
-      labelColor: "#ffffff"
+      /** Texto oscuro sobre boton1 (crema); el de VER ANUNCIO sigue blanco. */
+      labelColor: "#5a4030"
     },
     ad: {
       texture: "boton2",
@@ -642,7 +643,8 @@ export const HUD_LAYOUT = {
     blurbWrap: 240,
     ad: { y: 30, w: 228, h: 72, font: 15, lineSpacing: -4, icon: 16, iconGap: 6 },
     collect: { y: 110, w: 188, h: 52, font: 14 },
-    statusY: 214
+    /** Entre RECOGER y el borde inferior del marco — debe leerse siempre. */
+    statusY: 158
   },
 
   /**
@@ -676,6 +678,30 @@ export const HUD_LAYOUT = {
     depth: 95,
     size: 176,
     waterColor: 0x3aa8d8
+  },
+
+  /**
+   * Modal único: comparte el juego → olivos.
+   * Mismo chrome que diaria (modal_frame + header). Encima del Game Over.
+   */
+  shareReward: {
+    depth: 55,
+    panelY: 400,
+    frame: { w: 318, h: 420 },
+    header: { y: -190, w: 248, h: 62 },
+    title: { y: -192, fontSize: 18 },
+    close: { x: 138, y: -180, size: 44 },
+    bodyY: -100,
+    bodyFont: 15,
+    bodyWrap: 240,
+    shareY: 20,
+    shareW: 228,
+    shareH: 64,
+    laterY: 100,
+    laterW: 188,
+    laterH: 52,
+    btnFont: 15,
+    statusY: 160
   },
 
   /** Stub de rewarded ad (3-2-1) hasta AdMob. */

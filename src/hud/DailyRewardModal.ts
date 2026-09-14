@@ -119,7 +119,19 @@ export class DailyRewardModal {
       })
       .setOrigin(0.5);
     const kickAd = (): void => {
-      if (this.busy || this.doubled || this.settled) return;
+      if (this.doubled || this.settled) return;
+      if (this.busy) {
+        this.statusText
+          .setText(
+            t({
+              es: "Esperá: estamos cargando el anuncio…",
+              en: "Please wait: loading the ad…",
+              pt: "Aguarde: carregando o anúncio…"
+            })
+          )
+          .setVisible(true);
+        return;
+      }
       this.busy = true;
       this.setAdPressed(true);
       GameAudio.current?.onUiTap();
@@ -149,7 +161,7 @@ export class DailyRewardModal {
 
     this.statusText = scene.add
       .text(0, D.statusY, "", {
-        ...this.style(11, "#8a4030"),
+        ...this.style(13, "#8a4030", true),
         align: "center",
         wordWrap: { width: 260 }
       })
@@ -237,18 +249,23 @@ export class DailyRewardModal {
     this.statusText
       .setText(
         t({
-          es: "Cargando anuncio…",
-          en: "Loading ad…",
-          pt: "Carregando anúncio…"
+          es: "Cargando anuncio… Si no abre en unos segundos, podés Recoger 5.",
+          en: "Loading ad… If it doesn't open, you can Collect 5.",
+          pt: "Carregando anúncio… Se não abrir, use Coletar 5."
         })
       )
       .setVisible(true);
-    this.adLabel.setText(t({ es: "CARGANDO…", en: "LOADING…", pt: "CARREGANDO…" }).toUpperCase());
+    this.adLabel.setText(
+      t({ es: "CARGANDO…", en: "LOADING…", pt: "CARREGANDO…" }).toUpperCase()
+    );
     this.layoutAdLabel();
+    ScreenLoader.current?.show();
+
     let status: Awaited<ReturnType<typeof requestRewardedAd>> = "error";
     try {
       status = await requestRewardedAd("daily");
     } finally {
+      ScreenLoader.current?.hide();
       if (gen === this.adGen) {
         this.busy = false;
         this.setAdPressed(false);
@@ -261,9 +278,11 @@ export class DailyRewardModal {
     if (gen !== this.adGen || this.settled) return;
 
     if (status === "completed") {
+      console.log("[daily] rewarded completed → applyDouble");
       this.applyDouble();
       return;
     }
+    console.warn("[daily] rewarded not completed:", status);
     if (status === "unavailable") {
       this.statusText.setText(unavailableRewardedMessage()).setVisible(true);
       return;
@@ -272,9 +291,9 @@ export class DailyRewardModal {
       this.statusText
         .setText(
           t({
-            es: "Te quedas con 5 olivos.",
-            en: "You keep 5 olive leaves.",
-            pt: "Você fica com 5 azeitonas."
+            es: "Cerraste el anuncio. Todavía podés Recoger 5 o intentar de nuevo.",
+            en: "You closed the ad. You can still Collect 5 or try again.",
+            pt: "Você fechou o anúncio. Ainda pode Coletar 5 ou tentar de novo."
           })
         )
         .setVisible(true);
@@ -283,9 +302,9 @@ export class DailyRewardModal {
     this.statusText
       .setText(
         t({
-          es: "No se pudo cargar el anuncio. Te quedas con 5 olivos.",
-          en: "Couldn't load the ad. You keep 5 olive leaves.",
-          pt: "Não foi possível carregar o anúncio. Você fica com 5."
+          es: "No se pudo mostrar el anuncio. Tocá Recoger 5 o probá de nuevo.",
+          en: "Couldn't show the ad. Tap Collect 5 or try again.",
+          pt: "Não foi possível mostrar o anúncio. Toque Coletar 5 ou tente de novo."
         })
       )
       .setVisible(true);
@@ -296,6 +315,7 @@ export class DailyRewardModal {
     this.doubled = true;
     this.economy.grantOlives(DAILY_OLIVES);
     markDailyDoubled();
+    this.handlers?.onOlivesChanged();
     this.payoutVisual(DAILY_OLIVES * 2);
     sendToShell({
       type: "daily_reward_claimed",

@@ -47,6 +47,8 @@ import { showAdPrivacyOptions } from "./ads/consent";
 import {
   isRewardedBusy,
   preloadFullscreenAds,
+  showInterstitialAd,
+  showInterstitialOnGameOver,
   showRewardedOrReject
 } from "./ads/fullscreenAds";
 import {
@@ -58,6 +60,7 @@ import { isOnlineNow, subscribeConnectivity } from "./connectivity";
 import { requestNativeStoreReview } from "./storeReview";
 import { SHELL_COPY, st } from "./shellLocale";
 import { requestAttAfterGameReady } from "./att";
+import { shareGameInvite } from "./shareGame";
 
 const DISABLE_UI_JS = `
 (function(){
@@ -96,6 +99,25 @@ const iosWebViewProps: IOSWebViewProps = {
   pullToRefreshEnabled: false
 };
 
+/** Espera AppState active (o timeout) antes de inyectar al WebView tras un ad. */
+function waitForAppActive(timeoutMs = 1500): Promise<void> {
+  if (AppState.currentState === "active") return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      sub.remove();
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") finish();
+    });
+  });
+}
+
 type Props = {
   onBridgeEvent?: (event: BridgeOutEvent) => void;
   /** Snapshot AsyncStorage hidratado ANTES de montar el WebView. */
@@ -132,8 +154,12 @@ export function GameWebView({
   );
   const adsRemovedRef = useRef(adsRemoved);
   const canRequestAdsRef = useRef(canRequestAds);
+  const onBootFailedRef = useRef(onBootFailed);
+  const onGameReadyRef = useRef(onGameReady);
   canRequestAdsRef.current = canRequestAds;
   adsRemovedRef.current = adsRemoved;
+  onBootFailedRef.current = onBootFailed;
+  onGameReadyRef.current = onGameReady;
 
   useEffect(() => {
     void (async () => {
@@ -147,6 +173,9 @@ export function GameWebView({
     })();
   }, []);
 
+  // Boot UNA sola vez al montar. No poner callbacks en deps: si cambian de
+  // identidad (re-render de App), stop+start del server cambia el puerto,
+  // setUri recarga el WebView y el jugador vuelve a Home a mitad de partida.
   useEffect(() => {
     let cancelled = false;
 
@@ -175,7 +204,7 @@ export function GameWebView({
         console.error("[arca-shell] boot", e);
         if (!cancelled) {
           setError(msg);
-          onBootFailed?.();
+          onBootFailedRef.current?.();
         }
       }
     })();
@@ -185,7 +214,7 @@ export function GameWebView({
       void stopGameServer();
       void deactivateKeepAwake("arca-game");
     };
-  }, [onBootFailed]);
+  }, []);
 
   // Ciclo de vida → mensajes al juego. Servidor NO se apaga.
   // inactive (bloqueo de pantalla iOS / transición) también pausa audio.
@@ -237,28 +266,29 @@ export function GameWebView({
     return subscribeConnectivity(push);
   }, []);
 
-  const onMessage = useCallback(
-    (ev: WebViewMessageEvent) => {
-      const event = parseBridgeOut(ev.nativeEvent.data);
-      if (!event) return;
-      if (event.type === "debug_viewport") {
-        if (!IS_PRODUCTION) {
-          console.log("[bridge←game] debug_viewport", JSON.stringify(event));
-        }
-        // Fallback: listo un poco después de pintar (cubre builds sin game_ready).
-        if (event.phase === "ready+500ms") {
-          onGameReady?.();
-          void requestAttAfterGameReady();
-        }
-      } else if (!IS_PRODUCTION) {
-        console.log("[bridge←game]", event.type);
-      }
-      onBridgeEvent?.(event);
+  const onBridgeEventRef = useRef(onBridgeEvent);
+  onBridgeEventRef.current = onBridgeEvent;
 
-      if (event.type === "game_ready") {
-        onGameReady?.();
+  const onMessage = useCallback((ev: WebViewMessageEvent) => {
+    const event = parseBridgeOut(ev.nativeEvent.data);
+    if (!event) return;
+    if (event.type === "debug_viewport") {
+      if (!IS_PRODUCTION) {
+        console.log("[bridge←game] debug_viewport", JSON.stringify(event));
+      }
+      if (event.phase === "ready+500ms") {
+        onGameReadyRef.current?.();
         void requestAttAfterGameReady();
       }
+    } else if (!IS_PRODUCTION) {
+      console.log("[bridge←game]", event.type);
+    }
+    onBridgeEventRef.current?.(event);
+
+    if (event.type === "game_ready") {
+      onGameReadyRef.current?.();
+      void requestAttAfterGameReady();
+    }
 
       if (event.type === "settings_prefs") {
         hapticEnabled.current = event.haptic;
@@ -307,6 +337,7 @@ export function GameWebView({
               context
             });
           }
+          await waitForAppActive(1500);
           webRef.current?.injectJavaScript(
             injectBridgeIn({
               type: "rewarded_ad_result",
@@ -318,18 +349,73 @@ export function GameWebView({
         })();
       }
 
+      if (event.type === "request_interstitial") {
+        void (async () => {
+          let status: "shown" | "skipped" | "error" = "skipped";
+          try {
+            if (
+              !adsRemovedRef.current &&
+              canRequestAdsRef.current &&
+              !isRewardedBusy()
+            ) {
+              const shown = await showInterstitialAd();
+              status = shown ? "shown" : "skipped";
+            }
+          } catch (e) {
+            console.warn("[ads] interstitial", event.placement, e);
+            status = "error";
+          }
+          // Tras el fullscreen el WebView a veces aún está en background:
+          // inject se pierde y el juego queda sin drops/música.
+          await waitForAppActive(1500);
+          webRef.current?.injectJavaScript(
+            injectBridgeIn({
+              type: "interstitial_ad_result",
+              requestId: event.requestId,
+              status
+            })
+          );
+        })();
+      }
+
+      if (event.type === "request_share") {
+        void (async () => {
+          const status = await shareGameInvite(event.message);
+          webRef.current?.injectJavaScript(
+            injectBridgeIn({
+              type: "share_result",
+              requestId: event.requestId,
+              status
+            })
+          );
+        })();
+      }
+
       if (event.type === "game_over") {
-        void logAnalyticsEvent(AnalyticsEvents.gameOver, {
-          score: event.score,
-          arcas_completadas: event.arkCompletes ?? 0,
-          olivos_ganados: event.olivesEarned ?? 0,
-          duracion: event.durationSec ?? 0,
-          is_new_best: event.isNewBest ? 1 : 0
-        });
-        // Sin intersticial: Continuar = solo rewarded; Terminar / Game Over = sin ads.
-        webRef.current?.injectJavaScript(
-          injectBridgeIn({ type: "game_over_ads_done" })
-        );
+        void (async () => {
+          await logAnalyticsEvent(AnalyticsEvents.gameOver, {
+            score: event.score,
+            arcas_completadas: event.arkCompletes ?? 0,
+            olivos_ganados: event.olivesEarned ?? 0,
+            duracion: event.durationSec ?? 0,
+            is_new_best: event.isNewBest ? 1 : 0
+          });
+          // Intersticial solo en 2ª muerte (showInterstitial !== false).
+          // TERMINAR tras continue → false (ya rechazó el rewarded).
+          const showInterstitial = event.showInterstitial !== false;
+          if (
+            showInterstitial &&
+            !adsRemovedRef.current &&
+            canRequestAdsRef.current &&
+            !isRewardedBusy()
+          ) {
+            await showInterstitialOnGameOver();
+            await waitForAppActive(1500);
+            webRef.current?.injectJavaScript(
+              injectBridgeIn({ type: "game_over_ads_done" })
+            );
+          }
+        })();
       }
 
       if (event.type === "game_start") {
@@ -459,9 +545,7 @@ export function GameWebView({
           );
         })();
       }
-    },
-    [onBridgeEvent, onGameReady]
-  );
+  }, []);
 
   const showBanner =
     canRequestAds && !adsRemoved && SHELL_CONFIG.ads.bannerEnabled;

@@ -25,7 +25,11 @@ export const STORAGE_KEYS = {
   /** Partidas terminadas (para reseña ≥ 3). */
   gamesPlayed: "arca-games-played",
   /** Epoch ms de la última petición de reseña. */
-  lastReviewAskAt: "arca-last-review-ask"
+  lastReviewAskAt: "arca-last-review-ask",
+  /** "1" si ya se mostró el modal de compartir (1× vida). */
+  shareOfferShown: "arca-share-offer-shown",
+  /** "1" si ya se otorgaron los olivos por compartir. */
+  shareRewardClaimed: "arca-share-reward-claimed"
 } as const;
 
 /** Claves que el shell hidrata / migra (más locale y ajustes). */
@@ -37,6 +41,8 @@ export const NATIVE_MIRROR_KEYS = [
   STORAGE_KEYS.adsRemoved,
   STORAGE_KEYS.gamesPlayed,
   STORAGE_KEYS.lastReviewAskAt,
+  STORAGE_KEYS.shareOfferShown,
+  STORAGE_KEYS.shareRewardClaimed,
   "arca-settings",
   "arca-locale",
   "arca-daily-grant",

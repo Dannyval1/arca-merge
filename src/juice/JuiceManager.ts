@@ -1834,8 +1834,6 @@ export class JuiceManager {
           fontSize: "38px",
           fontStyle: "bold",
           color,
-          stroke: "#2a1208",
-          strokeThickness: 5,
           align: "center"
         }).setOrigin(0.5);
         this.root.add(txt);
@@ -1868,32 +1866,12 @@ export class JuiceManager {
     if (shout) bt.setCenterAlign().setLineSpacing(6);
     else bt.setLeftAlign().setLineSpacing(0);
 
-    let shadow = this.comboShadow;
-    if (shadow) {
-      this.scene.tweens.killTweensOf(shadow);
-      shadow.setText(label).setAlpha(0.9);
-    } else {
-      shadow = this.comboPool.acquire(label);
-      if (shadow) this.comboShadow = shadow;
-    }
-    if (shadow) {
-      if (shout) shadow.setCenterAlign().setLineSpacing(6);
-      else shadow.setLeftAlign().setLineSpacing(0);
+    if (this.comboShadow) {
+      this.scene.tweens.killTweensOf(this.comboShadow);
+      this.comboPool.release(this.comboShadow);
+      this.comboShadow = null;
     }
 
-    if (shadow) {
-      shadow
-        .setPosition(startX + 3, startY + 4)
-        .setScale(scale * cfg.popScale)
-        .setAlpha(0.9)
-        .setTint(0x2a1208);
-      this.root.bringToTop(shadow);
-      this.playReadableText(shadow, scale, startY + 4, anim, () => {
-        if (gen !== this.comboShoutGen) return;
-        this.comboPool.release(shadow!);
-        if (this.comboShadow === shadow) this.comboShadow = null;
-      });
-    }
     this.root.bringToTop(bt);
     bt.setPosition(startX, startY)
       .setScale(scale * cfg.popScale)

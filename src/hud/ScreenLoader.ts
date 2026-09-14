@@ -76,8 +76,7 @@ export class ScreenLoader {
     this.fillTween = this.scene.tweens.add({
       targets: this.fillProxy,
       t: 0.92,
-      duration: 2100,
-      yoyo: true,
+      duration: 1800,
       repeat: -1,
       ease: "Sine.easeInOut",
       onUpdate: () => this.layoutFill()

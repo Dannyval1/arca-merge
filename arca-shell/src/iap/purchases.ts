@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import Purchases, {
   LOG_LEVEL,
+  PRODUCT_CATEGORY,
   PURCHASES_ERROR_CODE,
   type CustomerInfo,
   type PurchasesPackage,
@@ -114,12 +115,15 @@ export async function fetchShopCatalog(): Promise<CatalogProduct[]> {
   if (usingStub) return stubCatalog();
 
   try {
-    const products = await Purchases.getProducts([
-      PRODUCT_IDS.olives_50,
-      PRODUCT_IDS.olives_150,
-      PRODUCT_IDS.olives_400,
-      PRODUCT_IDS.remove_ads
-    ]);
+    const products = await Purchases.getProducts(
+      [
+        PRODUCT_IDS.olives_50,
+        PRODUCT_IDS.olives_150,
+        PRODUCT_IDS.olives_400,
+        PRODUCT_IDS.remove_ads
+      ],
+      PRODUCT_CATEGORY.NON_SUBSCRIPTION
+    );
     const out: CatalogProduct[] = [];
     for (const p of products) {
       const label = priceLabelOf(p);
@@ -173,13 +177,19 @@ function hasNoAdsEntitlement(info: CustomerInfo): boolean {
 async function findStoreProduct(
   productId: string
 ): Promise<PurchasesStoreProduct | null> {
-  const products = await Purchases.getProducts([productId]);
+  // Android: IAP one-time (no suscripción). Sin esto getProducts puede devolver vacío.
+  const products = await Purchases.getProducts(
+    [productId],
+    PRODUCT_CATEGORY.NON_SUBSCRIPTION
+  );
   return products.find((p) => p.identifier === productId) ?? products[0] ?? null;
 }
 
 /**
- * Compra consumible de olivos. Tras éxito, consume vía syncPurchases implícito
- * (RevenueCat + Play Billing consumibles).
+ * Compra de olivos (consumible).
+ * No llamamos consumeAsync: RevenueCat lo hace solo si el producto está
+ * marcado como Consumable en el dashboard (Product catalog → Products).
+ * No adjuntar olives_* al entitlement no_ads.
  */
 export async function purchaseOlivesProduct(
   packageId: string
@@ -210,6 +220,11 @@ export async function purchaseOlivesProduct(
   }
 }
 
+/**
+ * Quitar anuncios (no consumible / lifetime).
+ * En el dashboard: NO marcar como Consumable; adjuntar a entitlement `no_ads`.
+ * El SDK solo acknowledge; restorePurchases + entitlement lo reactivan.
+ */
 export async function purchaseRemoveAds(): Promise<IapStatus> {
   if (!isOnlineNow()) return "unavailable";
 

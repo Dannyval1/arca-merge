@@ -135,8 +135,11 @@ export class GameAudio {
   onAppForeground(): void {
     if (!this.backgroundPaused) return;
     this.backgroundPaused = false;
-    if (this.adPaused) return;
+    // No hacer early-return por adPaused: el anuncio fullscreen ya no tiene
+    // el foco; si el bridge no entregó result, mute/BGM quedarían muertos.
+    this.adPaused = false;
     try {
+      this.scene.sound.mute = false;
       this.scene.sound.resumeAll();
     } catch {
       // ignore
@@ -146,24 +149,31 @@ export class GameAudio {
     }
   }
 
-  /** Fullscreen ad (rewarded / interstitial): corta BGM y loops. */
+  /** Fullscreen ad (rewarded / interstitial): corta BGM y SFX. */
   pauseForAd(): void {
     if (this.adPaused) return;
     this.adPaused = true;
-    this.pauseMusicInternal();
     try {
-      if (this.watersLoop?.isPlaying) this.watersLoop.pause();
+      this.scene.sound.mute = true;
+      this.scene.sound.pauseAll();
     } catch {
       // ignore
     }
+    this.pauseMusicInternal();
   }
 
   resumeAfterAd(): void {
-    if (!this.adPaused) return;
     this.adPaused = false;
+    // Siempre desmutear: el ad puede cerrarse aún con backgroundPaused=true;
+    // si no, la música queda muteada para siempre.
+    try {
+      this.scene.sound.mute = false;
+    } catch {
+      // ignore
+    }
     if (this.backgroundPaused) return;
     try {
-      if (this.watersLoop?.isPaused) this.watersLoop.resume();
+      this.scene.sound.resumeAll();
     } catch {
       // ignore
     }

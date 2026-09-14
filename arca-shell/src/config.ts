@@ -2,9 +2,10 @@
  * Un solo interruptor para release. Mantener en false mientras desarrollas.
  * Al publicar: IS_PRODUCTION = true (y el mismo valor en src/buildFlags.ts del juego).
  */
-export const IS_PRODUCTION = false;
+export const IS_PRODUCTION = true;
 
-const DEV_VITE = true;
+/** true = WebView carga Vite en LAN (solo si el Mac tiene `npm run dev`). */
+const DEV_VITE = false;
 const DEV_TEST_IDS = true;
 const DEV_BANNER = false;
 
@@ -30,13 +31,20 @@ export const SHELL_CONFIG = {
    */
   viteDevUrl: "http://192.168.1.20:5173",
 
-  gameBuildId: "2026-09-07.1642",
+  gameBuildId: "2026-09-14.2311",
 
   staticServerPort: 0 as number,
   stopServerInBackground: false,
   bannerReservePx: 50,
 
   privacyPolicyUrl: "https://dannyval1.github.io/privacy-policies/arca-merge/",
+
+  /** Links de tienda para “Comparte y gana olivos”. */
+  storeUrls: {
+    android: "https://play.google.com/store/apps/details?id=com.arcamerge.app",
+    /** Actualizar cuando exista ficha iOS. */
+    ios: "https://apps.apple.com/app/id0000000000"
+  },
 
   /**
    * RevenueCat — claves PÚBLICAS (sdk_… / goog_… / appl_…).
@@ -45,14 +53,17 @@ export const SHELL_CONFIG = {
    */
   revenueCat: {
     iosApiKey: "",
-    androidApiKey: "",
+    androidApiKey: "goog_gdhkgEnLrxyBljpiUtWHbLrcakp",
     /** true = stubs aunque haya keys (útil sin productos en Play/App Store). */
     forceStub: false
   },
 
   ads: {
-    /** Forzado a false si IS_PRODUCTION. */
-    useTestIds: IS_PRODUCTION ? false : DEV_TEST_IDS,
+    /**
+     * true = TestIds de Google (seguro para desarrollo).
+     * En producción: siempre ligado a !IS_PRODUCTION.
+     */
+    useTestIds: !IS_PRODUCTION,
 
     /** En prod suele ir true; en DEV se puede dejar apagado. */
     bannerEnabled: IS_PRODUCTION ? true : DEV_BANNER,
@@ -71,7 +82,7 @@ export const SHELL_CONFIG = {
       | "error",
 
     rewardedDailyCap: 8,
-    interstitialMinIntervalMs: 3 * 60 * 1000,
+    interstitialMinIntervalMs: 60 * 1000,
 
     android: {
       appId: "ca-app-pub-4782245353460263~4297683630",

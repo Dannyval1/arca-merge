@@ -20,7 +20,7 @@ import { DailyRewardModal } from "./hud/DailyRewardModal";
 import { prewarmAnimalTextures } from "./hud/warmAnimals";
 import { ENABLE_GAME_DEBUG } from "./buildFlags";
 import { flyOlivesToCounter, punchOliveLabel, tweenOliveCounter } from "./hud/oliveFly";
-import { DAILY_OLIVES, shouldShowDailyModal } from "./dailyGrant";
+import { DAILY_OLIVES, dismissDailyModal, shouldShowDailyModal } from "./dailyGrant";
 import { queueGameAssets } from "./preload";
 
 const ICON_KEYS = ["btn_tienda", "btn_settings", "btn_questions"] as const;
@@ -87,7 +87,7 @@ export class HomeScene extends Phaser.Scene {
       "btn_green",
       L.play.w,
       L.play.h,
-      () => this.scene.start("game"),
+      () => this.goToGame(),
       "dim"
     );
     this.playLabel = this.add
@@ -174,6 +174,7 @@ export class HomeScene extends Phaser.Scene {
     this.dailyReward.setHandlers({
       onOlivesChanged: () => this.refreshOlives(),
       olivesAnchor: () => ({ x: L.olives.cx, y: L.olives.y }),
+      // Mientras el modal está abierto, mostrar saldo “antes” del grant (+5 ya en storage).
       previewDailyOlives: (amount) => {
         this.setOliveLabel(Math.max(0, this.economy.getOlives() - amount));
       },
@@ -257,6 +258,16 @@ export class HomeScene extends Phaser.Scene {
 
   private refreshOlives(): void {
     this.setOliveLabel(this.economy.getOlives());
+  }
+
+  /** Al entrar al juego: cerrar claim diario pendiente (olivos ya están en storage). */
+  private goToGame(): void {
+    if (shouldShowDailyModal()) {
+      dismissDailyModal();
+      this.dailyReward.close();
+    }
+    this.refreshOlives();
+    this.scene.start("game");
   }
 
   private setOliveLabel(n: number): void {

@@ -25,6 +25,8 @@ export type BridgeOutEvent =
       isNewBest?: boolean;
       olivesEarned?: number;
       durationSec?: number;
+      /** false = sin intersticial (TERMINAR tras continue). */
+      showInterstitial?: boolean;
     }
   | { type: "game_start" }
   /** Home ya pintó; ocultar splash nativo. */
@@ -43,6 +45,8 @@ export type BridgeOutEvent =
   | { type: "open_url"; url: string }
   | { type: "restore_purchases"; requestId: string }
   | { type: "request_rewarded_ad"; requestId: string; powerId: string }
+  | { type: "request_interstitial"; requestId: string; placement: string }
+  | { type: "request_share"; requestId: string; message: string }
   | { type: "purchase_olives"; requestId: string; packageId: string }
   | { type: "request_shop_catalog" }
   | { type: "power_used"; powerId: string }
@@ -86,6 +90,16 @@ export type BridgeInEvent =
   | { type: "app_foreground" }
   | { type: "shell_info"; platform: "ios" | "android" | "web"; privacyOptionsRequired?: boolean }
   | { type: "game_over_ads_done" }
+  | {
+      type: "interstitial_ad_result";
+      requestId: string;
+      status: "shown" | "skipped" | "error";
+    }
+  | {
+      type: "share_result";
+      requestId: string;
+      status: "shared" | "dismissed" | "unavailable" | "error";
+    }
   | { type: "connectivity"; online: boolean };
 
 export function parseBridgeOut(raw: string): BridgeOutEvent | null {

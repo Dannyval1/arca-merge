@@ -70,34 +70,68 @@ export function preloadFullscreenAds(): void {
 }
 
 /**
- * Intersticial en game_over, ANTES del modal. Si no hay anuncio listo,
- * no espera: el juego puede mostrar el resultado al instante.
- * Quitar anuncios: el caller no debe llamar esto.
+ * Intersticial fullscreen. Si no hay inventario / cooldown, no espera.
+ * Nunca se cuelga: si show() no abre/cierra, watchdog libera el juego.
+ * @returns true si se mostró y cerró.
  */
-export async function showInterstitialOnGameOver(): Promise<void> {
-  if (!(await canShowInterstitial())) return;
+export async function showInterstitialAd(): Promise<boolean> {
+  if (!(await canShowInterstitial())) return false;
   const ad = interstitial;
   if (!ad || !interstitialLoaded) {
     if (ad && !interstitialLoaded) ad.load();
-    return;
+    return false;
   }
 
   interstitialLoaded = false;
-  await new Promise<void>((resolve) => {
-    const finish = (): void => {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let opened = false;
+
+    const finish = (shown: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(openWatch);
+      clearTimeout(watchdog);
       unsubClosed();
       unsubErr();
-      void recordInterstitialShown();
+      unsubOpened();
+      if (shown) void recordInterstitialShown();
       resetInterstitial();
-      resolve();
+      resolve(shown);
     };
-    const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, finish);
-    const unsubErr = ad.addAdEventListener(AdEventType.ERROR, finish);
+
+    const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, () =>
+      finish(true)
+    );
+    const unsubErr = ad.addAdEventListener(AdEventType.ERROR, () =>
+      finish(false)
+    );
+    const unsubOpened = ad.addAdEventListener(AdEventType.OPENED, () => {
+      opened = true;
+    });
+
+    // show() a veces no dispara CLOSED/ERROR → bloqueaba mid-run para siempre.
+    const openWatch = setTimeout(() => {
+      if (!opened) {
+        console.warn("[ads] interstitial never opened");
+        finish(false);
+      }
+    }, 5_000);
+    const watchdog = setTimeout(() => {
+      console.warn("[ads] interstitial show timeout");
+      finish(false);
+    }, 45_000);
+
     ad.show().catch((e) => {
       console.warn("[ads] interstitial show", e);
-      finish();
+      finish(false);
     });
   });
+}
+
+/** @deprecated alias — game over usa showInterstitialAd. */
+export async function showInterstitialOnGameOver(): Promise<void> {
+  await showInterstitialAd();
 }
 
 let rewardedShowLock = false;
@@ -147,12 +181,16 @@ async function showRewardedInner(): Promise<RewardedReply> {
   return new Promise<RewardedReply>((resolve) => {
     let earned = false;
     let settled = false;
+    let opened = false;
     const settle = (reply: RewardedReply): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(openWatch);
+      clearTimeout(watchdog);
       unsubEarn();
       unsubClosed();
       unsubErr();
+      unsubOpened();
       console.log("[ads] rewarded result", reply.status);
       resetRewarded();
       resolve(reply);
@@ -175,6 +213,21 @@ async function showRewardedInner(): Promise<RewardedReply> {
     const unsubErr = ad.addAdEventListener(AdEventType.ERROR, () => {
       settle({ status: "error" });
     });
+    const unsubOpened = ad.addAdEventListener(AdEventType.OPENED, () => {
+      opened = true;
+    });
+
+    // Misma falla que intersticial: show() sin OPENED/CLOSED deja el modal colgado.
+    const openWatch = setTimeout(() => {
+      if (!opened) {
+        console.warn("[ads] rewarded never opened");
+        settle({ status: "error" });
+      }
+    }, 5_000);
+    const watchdog = setTimeout(() => {
+      console.warn("[ads] rewarded show timeout");
+      settle({ status: "error" });
+    }, 120_000);
 
     ad.show().catch((e) => {
       console.warn("[ads] rewarded show", e);

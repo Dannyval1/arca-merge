@@ -7,7 +7,13 @@ import {
   ARK_OLIVE_REWARD,
   CHAIN
 } from "./chain";
-import { sendToShell, startBridgeListener } from "./bridge";
+import {
+  sendToShell,
+  startBridgeListener,
+  waitForGameOverAdsDone,
+  requestInterstitialAd,
+  onAppLifecycle
+} from "./bridge";
 import { bumpGamesPlayed, maybeRequestReviewAfterNewBest } from "./reviewGate";
 import { ENABLE_GAME_DEBUG } from "./buildFlags";
 import {
@@ -28,8 +34,17 @@ import {
   type DebugPowerState
 } from "./powers";
 import { TopHud, ChainBar, BANNER_RESERVE_PX } from "./hud";
+import { AdCountdown } from "./hud/AdCountdown";
 import { GameOverModal } from "./hud/GameOverModal";
 import { ContinueModal } from "./hud/ContinueModal";
+import { t } from "./powers/locale";
+import { ShareRewardModal } from "./hud/ShareRewardModal";
+import {
+  markShareOfferShown,
+  shouldOfferShareReward,
+  SHARE_REWARD_OLIVES,
+  tryMarkShareRewardClaimed
+} from "./shareOffer";
 import { ScreenLoader } from "./hud/ScreenLoader";
 import { STORAGE_KEYS, storageGetNumber, storageSetNumber } from "./storage";
 import { syncSettingsPrefsToShell } from "./settingsPrefs";
@@ -69,7 +84,10 @@ const ARK_WIDTH_SCALE = 1.12;
 // ---- Física (ajusta la "sensación" aquí) ----
 const RESTITUTION = 0.12;
 const FRICTION = 0.35;
+/** Espera tras soltar antes de mostrar el siguiente preview. */
 const DROP_COOLDOWN_MS = 550;
+/** Tras ~1.5 min de partida, un solo intersticial (si no compró sin anuncios). */
+const MID_RUN_AD_AFTER_MS = 90_000;
 const DANGER_TIME_MS = 1800;
 /** Pieza joven / en caída: no cuenta para el aviso de la línea. */
 const DANGER_SETTLE_MS = 700;
@@ -168,6 +186,7 @@ export class GameScene extends Phaser.Scene {
   private chainBar!: ChainBar;
   private gameOverModal!: GameOverModal;
   private continueModal!: ContinueModal;
+  private shareRewardModal!: ShareRewardModal;
 
   private canDrop = true;
   private isOver = false;
@@ -182,6 +201,13 @@ export class GameScene extends Phaser.Scene {
   /** Hojas ganadas jugando en esta partida (no IAP). */
   private olivesThisRun = 0;
   private runStartedAt = 0;
+  /** Un intersticial mid-run por partida (máximo). */
+  private midRunAdDone = false;
+  private midRunAdBusy = false;
+  /** True mientras esperamos interstitial_ad_result del shell. */
+  private midRunAdAwaitingResult = false;
+  private midRunSafetyTimer: Phaser.Time.TimerEvent | null = null;
+  private unsubLifecycle: (() => void) | null = null;
   private pendingReviewAfterGo = false;
   /**
    * Las Aguas: física/VFX pueden seguir tras APPLYING si
@@ -234,6 +260,9 @@ export class GameScene extends Phaser.Scene {
     this.arksThisRun = 0;
     this.olivesThisRun = 0;
     this.runStartedAt = Date.now();
+    this.midRunAdDone = false;
+    this.midRunAdBusy = false;
+    this.midRunAdAwaitingResult = false;
     this.pendingReviewAfterGo = false;
     this.gestureConsumed = false;
     this.animals = [];
@@ -242,6 +271,15 @@ export class GameScene extends Phaser.Scene {
 
     startBridgeListener();
     syncSettingsPrefsToShell();
+    this.unsubLifecycle?.();
+    this.unsubLifecycle = onAppLifecycle((type) => {
+      if (type === "app_foreground") this.onMidRunForeground();
+    });
+    this.game.events.on(
+      Phaser.Core.Events.VISIBLE,
+      this.onMidRunForeground,
+      this
+    );
 
     this.renderScale = getRenderScale();
     this.sceneBg = this.add.image(W / 2, H / 2, "bg").setDepth(0);
@@ -412,8 +450,10 @@ export class GameScene extends Phaser.Scene {
     this.continueModal = new ContinueModal(this, this.renderScale);
     this.continueModal.setHandlers({
       onContinue: () => this.applyContinue(),
-      onEndRun: () => this.finalizeGameOver()
+      // Ya rechazó el rewarded de continue: no meter intersticial al terminar.
+      onEndRun: () => this.finalizeGameOver({ showInterstitial: false })
     });
+    this.shareRewardModal = new ShareRewardModal(this, this.renderScale);
   }
 
   /** Fuera del pointerup del botón: si restart() corre en el mismo tap, Phaser se queda colgado. */
@@ -625,7 +665,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drop(x: number): void {
-    if (this.isOver || !this.canDrop || this.powers.blocksDrop()) return;
+    if (
+      this.isOver ||
+      !this.canDrop ||
+      this.midRunAdBusy ||
+      this.powers.blocksDrop()
+    ) {
+      return;
+    }
     this.canDrop = false;
 
     const level = this.currentLevel;
@@ -1145,10 +1192,19 @@ export class GameScene extends Phaser.Scene {
     this.chainBar?.destroy();
     this.continueModal?.destroy();
     this.gameOverModal?.destroy();
+    this.shareRewardModal?.destroy();
     this.powers.destroy();
     this.juice.destroy();
     this.loader?.destroy();
     this.audio?.destroy();
+    this.unsubLifecycle?.();
+    this.unsubLifecycle = null;
+    this.clearMidRunSafetyTimer();
+    this.game.events.off(
+      Phaser.Core.Events.VISIBLE,
+      this.onMidRunForeground,
+      this
+    );
     this.scale.off("resize", this.layoutView, this);
     window.arcaDebug = undefined;
   }
@@ -1664,7 +1720,7 @@ export class GameScene extends Phaser.Scene {
     if (this.canDrop) this.drawDropGuide();
 
     // Ocultar preview mientras el jugador elige objetivo de un poder.
-    if (this.powers.blocksDrop()) {
+    if (this.powers.blocksDrop() || this.midRunAdBusy) {
       this.preview.setVisible(false);
       this.juice.setPreviewActive(false);
     } else if (this.canDrop && !this.preview.visible) {
@@ -1673,14 +1729,24 @@ export class GameScene extends Phaser.Scene {
 
     let dangerProximity = 0;
     let dangerOverLine = false;
-    // Durante Las Aguas no corre el dwell ni el game over por la línea:
-    // el montón flota y puede cruzar temporalmente. Se evalúa al terminar.
-    if (this.watersActive) {
+    // No acumular peligro si la física está pausada (modal / mid-run ad):
+    // el animal queda congelado sobre la línea y disparaba Game Over falso.
+    const physicsPaused = !this.matter.world.enabled;
+    if (
+      this.watersActive ||
+      this.powers.blocksDrop() ||
+      this.midRunAdBusy ||
+      this.awaitingContinue ||
+      physicsPaused
+    ) {
       for (let i = 0; i < this.animals.length; i++) {
         this.animals[i].body.setData("dangerMs", 0);
       }
       this.juice.onDangerZone(false, 0);
       this.pulseDangerLine(0, false, delta);
+      if (!this.midRunAdBusy && !this.awaitingContinue && !physicsPaused) {
+        this.maybeOfferMidRunAd();
+      }
       return;
     }
 
@@ -1728,6 +1794,102 @@ export class GameScene extends Phaser.Scene {
       this.lastHudDanger = inDanger;
       this.powers.notifyBoardChanged();
     }
+
+    this.maybeOfferMidRunAd();
+  }
+
+  /**
+   * Un solo intersticial a mitad de partida (~90s), en un momento seguro.
+   * No corre si compró “sin anuncios”, ni durante poderes / peligro / modales.
+   */
+  private maybeOfferMidRunAd(): void {
+    if (
+      this.midRunAdDone ||
+      this.midRunAdBusy ||
+      this.isOver ||
+      this.awaitingContinue ||
+      hasAdsRemoved() ||
+      !this.canDrop ||
+      this.powers.blocksDrop() ||
+      this.isInDangerZone() ||
+      this.animals.length < 1 ||
+      Date.now() - this.runStartedAt < MID_RUN_AD_AFTER_MS
+    ) {
+      return;
+    }
+    void this.runMidRunAd();
+  }
+
+  private async runMidRunAd(): Promise<void> {
+    if (this.midRunAdDone || this.midRunAdBusy || hasAdsRemoved()) return;
+    this.midRunAdBusy = true;
+    this.midRunAdDone = true;
+    this.canDrop = false;
+    this.powers.setGameDisabled(true);
+    this.preview.setVisible(false);
+    this.juice.setPreviewActive(false);
+    // Contador CON física aún activa (el montón no queda congelado en peligro).
+    try {
+      await AdCountdown.play(
+        this,
+        3,
+        t({
+          es: "Anuncio en…",
+          en: "Ad in…",
+          pt: "Anúncio em…"
+        })
+      );
+      if (!this.sys.isActive() || this.isOver) return;
+      this.matter.world.pause();
+      this.midRunAdAwaitingResult = true;
+      // Si AdMob no abre el fullscreen, no hay background/VISIBLE ni result:
+      // sin este watchdog el tablero queda congelado y sin música.
+      this.clearMidRunSafetyTimer();
+      this.midRunSafetyTimer = this.time.delayedCall(7_000, () => {
+        if (!this.midRunAdAwaitingResult) return;
+        console.warn("[mid-run ad] safety restore (no ad / no result)");
+        this.restoreAfterMidRunAd();
+      });
+      await requestInterstitialAd("mid_run");
+    } catch (e) {
+      console.warn("[mid-run ad]", e);
+    } finally {
+      this.midRunAdAwaitingResult = false;
+      this.restoreAfterMidRunAd();
+    }
+  }
+
+  /**
+   * Si el shell no inyecta interstitial_ad_result (WebView en background),
+   * al volver a foreground hay que desbloquear drops/preview igualmente.
+   * Solo tras pedir el intersticial — no durante el 3-2-1.
+   */
+  private onMidRunForeground(): void {
+    if (!this.midRunAdAwaitingResult) return;
+    this.restoreAfterMidRunAd();
+  }
+
+  private clearMidRunSafetyTimer(): void {
+    this.midRunSafetyTimer?.remove(false);
+    this.midRunSafetyTimer = null;
+  }
+
+  /** Idempotente: reanuda física, drops, poderes y preview tras mid-run ad. */
+  private restoreAfterMidRunAd(): void {
+    this.clearMidRunSafetyTimer();
+    this.midRunAdBusy = false;
+    this.midRunAdAwaitingResult = false;
+    if (!this.sys.isActive() || this.isOver || this.awaitingContinue) return;
+    try {
+      this.matter.world.resume();
+    } catch {
+      // ignore
+    }
+    this.canDrop = true;
+    this.powers.setGameDisabled(false);
+    this.refreshPreview();
+    this.powers.notifyBoardChanged();
+    this.audio?.resumeAfterAd();
   }
 
   private gameOver(): void {
@@ -1790,7 +1952,19 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private finalizeGameOver(): void {
+  private finalizeGameOver(opts?: { showInterstitial?: boolean }): void {
+    void this.runFinalizeGameOver(opts);
+  }
+
+  /**
+   * Resultado final.
+   * - 2ª muerte: 3-2-1 → intersticial (shell) → modal.
+   * - TERMINAR tras continue: sin intersticial (ya le ofrecimos rewarded).
+   * - “sin anuncios”: salta contador e intersticial.
+   */
+  private async runFinalizeGameOver(opts?: {
+    showInterstitial?: boolean;
+  }): Promise<void> {
     this.awaitingContinue = false;
     this.isOver = true;
     this.canDrop = false;
@@ -1822,8 +1996,22 @@ export class GameScene extends Phaser.Scene {
       arkCompletes: this.arksThisRun,
       olivesEarned: this.olivesThisRun
     };
-    // Sin ads en Game Over: modal al instante. El shell solo recibe la señal.
-    this.gameOverModal.show(payload);
+
+    const wantInterstitial =
+      opts?.showInterstitial !== false && !hasAdsRemoved();
+    if (wantInterstitial) {
+      await AdCountdown.play(
+        this,
+        3,
+        t({
+          es: "Anuncio en…",
+          en: "Ad in…",
+          pt: "Anúncio em…"
+        })
+      );
+      if (!this.sys.isActive()) return;
+    }
+
     sendToShell({
       type: "game_over",
       score: this.score,
@@ -1831,7 +2019,36 @@ export class GameScene extends Phaser.Scene {
       arkCompletes: this.arksThisRun,
       isNewBest,
       olivesEarned: this.olivesThisRun,
-      durationSec
+      durationSec,
+      showInterstitial: wantInterstitial
+    });
+
+    if (wantInterstitial) {
+      // Feedback mientras el shell muestra el intersticial / entrega el done.
+      this.loader?.show();
+      try {
+        await waitForGameOverAdsDone();
+      } finally {
+        this.loader?.hide();
+      }
+      if (!this.sys.isActive()) return;
+    }
+
+    // Tras el anuncio (o al instante si sin ads): oferta de share 1× vida.
+    if (shouldOfferShareReward()) {
+      markShareOfferShown();
+      const shareResult = await this.shareRewardModal.showAndWait();
+      if (!this.sys.isActive()) return;
+      if (shareResult === "shared" && tryMarkShareRewardClaimed()) {
+        this.powers.grantOlives(SHARE_REWARD_OLIVES);
+        this.olivesThisRun += SHARE_REWARD_OLIVES;
+        this.topHud.setOlives(this.powers.debugSnapshot().olives);
+      }
+    }
+
+    this.gameOverModal.show({
+      ...payload,
+      olivesEarned: this.olivesThisRun
     });
   }
 }

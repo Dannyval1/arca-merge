@@ -1,4 +1,5 @@
 import { Asset } from "expo-asset";
+import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { unzipSync } from "fflate";
 import { SHELL_CONFIG } from "./config";
@@ -10,20 +11,32 @@ function gameRoot(): string {
 }
 
 /**
+ * Clave de cache del dist. Incluye versionCode nativo para que un update
+ * de Play Store siempre re-extraiga aunque gameBuildId coincida con un
+ * install local previo (mismo package name).
+ */
+function expectedCacheKey(): string {
+  const native = Constants.nativeBuildVersion ?? "0";
+  return `${SHELL_CONFIG.gameBuildId}|native:${native}`;
+}
+
+/**
  * Asegura que documentDirectory/arca-game tiene el dist del juego
- * (extraído del zip embebido si el GAME_BUILD_ID cambió).
+ * (extraído del zip embebido si el cache key cambió).
  */
 export async function ensureGameFilesReady(): Promise<string> {
   const root = gameRoot();
   const markerPath = `${root}${MARKER}`;
+  const want = expectedCacheKey();
   const info = await FileSystem.getInfoAsync(markerPath);
   if (info.exists) {
     const id = await FileSystem.readAsStringAsync(markerPath);
-    if (id.trim() === SHELL_CONFIG.gameBuildId) {
+    if (id.trim() === want) {
       return root;
     }
   }
 
+  console.log("[arca-shell] extracting game dist", want);
   await FileSystem.deleteAsync(root, { idempotent: true });
   await FileSystem.makeDirectoryAsync(root, { intermediates: true });
 
@@ -58,6 +71,7 @@ export async function ensureGameFilesReady(): Promise<string> {
     });
   }
 
-  await FileSystem.writeAsStringAsync(markerPath, SHELL_CONFIG.gameBuildId);
+  await FileSystem.writeAsStringAsync(markerPath, want);
+
   return root;
 }

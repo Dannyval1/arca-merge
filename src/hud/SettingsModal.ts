@@ -654,13 +654,6 @@ export class SettingsModal {
 
   private openPrivacy(): void {
     sendToShell({ type: "open_privacy_policy" });
-    this.statusText.setText(
-      t({
-        es: "Abriendo política de privacidad…",
-        en: "Opening privacy policy…",
-        pt: "Abrindo política de privacidade…"
-      })
-    );
   }
 
   private openAdConsent(): void {

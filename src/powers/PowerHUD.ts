@@ -39,6 +39,8 @@ type ButtonViews = {
   def: PowerDef;
   root: Phaser.GameObjects.Container;
   icon: Phaser.GameObjects.Image;
+  colorKey: string;
+  mutedKey: string;
   /** Pastilla de usos (esquina superior derecha). */
   badgeBg: Phaser.GameObjects.Graphics;
   badgeText: Phaser.GameObjects.BitmapText;
@@ -47,23 +49,63 @@ type ButtonViews = {
   pulsing: boolean;
 };
 
+function mutedIconKey(srcKey: string): string {
+  return `${srcKey}-muted`;
+}
+
 /**
- * Tint multiply para icono deshabilitado: desaturación + oscurecimiento.
- * Mantiene alpha 1 (no parece “medio dibujado”).
+ * Canvas (Android WebView) ignora Image.setTint. Bakeamos una textura
+ * desaturada/oscurecida una vez por icono, manteniendo detalle y alpha 1.
  */
-export function disabledPowerTint(
+function ensureMutedPowerIcon(
+  scene: Phaser.Scene,
+  srcKey: string,
   desaturate: number,
   darken: number
-): number {
+): string {
+  const key = mutedIconKey(srcKey);
+  if (scene.textures.exists(key)) return key;
+  if (!scene.textures.exists(srcKey)) return srcKey;
+
+  const frame = scene.textures.get(srcKey).get();
+  const src = frame.source?.image as
+    | HTMLImageElement
+    | HTMLCanvasElement
+    | undefined;
+  if (!src) return srcKey;
+
+  const sw = Math.max(1, frame.cutWidth || frame.width || 64);
+  const sh = Math.max(1, frame.cutHeight || frame.height || 64);
+  const maxSide = 96;
+  const scale = Math.min(1, maxSide / Math.max(sw, sh));
+  const w = Math.max(24, Math.round(sw * scale));
+  const h = Math.max(24, Math.round(sh * scale));
+
+  const canvasTex = scene.textures.createCanvas(key, w, h);
+  if (!canvasTex) return srcKey;
+  const ctx = canvasTex.getContext();
+  const sx = frame.cutX || 0;
+  const sy = frame.cutY || 0;
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+
   const d = Math.min(1, Math.max(0, desaturate));
   const k = Math.min(1, Math.max(0.12, 1 - darken));
-  // Gris frío: lee bien sobre fondos claros (Cuervo) y sobre iconos saturados.
-  const gray = 0x9a;
-  const cool = 0x8e;
-  const r = Math.round((0xff * (1 - d) + gray * d) * k);
-  const g = Math.round((0xff * (1 - d) + gray * d) * k);
-  const b = Math.round((0xff * (1 - d) + cool * d) * k);
-  return (r << 16) | (g << 8) | b;
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    data[i] = Math.round((r * (1 - d) + lum * d) * k);
+    data[i + 1] = Math.round((g * (1 - d) + lum * d) * k);
+    data[i + 2] = Math.round((b * (1 - d) + lum * d) * k);
+  }
+  ctx.putImageData(imageData, 0, 0);
+  canvasTex.refresh();
+  return key;
 }
 
 /**
@@ -133,8 +175,15 @@ export class PowerHUD {
 
       const btnRoot = scene.add.container(x, y);
 
+      const colorKey = def.iconTexture;
+      const mutedKey = ensureMutedPowerIcon(
+        scene,
+        colorKey,
+        F.disabled.desaturate,
+        F.disabled.darken
+      );
       const icon = scene.add
-        .image(0, -1, def.iconTexture)
+        .image(0, -1, colorKey)
         .setDisplaySize(F.iconSize, F.iconSize);
 
       const { cx: badgeX, cy: badgeY } = this.badgeCenter();
@@ -161,6 +210,8 @@ export class PowerHUD {
         def,
         root: btnRoot,
         icon,
+        colorKey,
+        mutedKey,
         badgeBg,
         badgeText,
         bodyHit,
@@ -353,14 +404,13 @@ export class PowerHUD {
   }
 
   private setIconStyle(btn: ButtonViews, style: "full" | "muted"): void {
-    if (style === "full") {
-      btn.icon.clearTint().setAlpha(1);
-    } else {
-      const D = HUD_LAYOUT.fila2.disabled;
-      btn.icon
-        .setTint(disabledPowerTint(D.desaturate + 0.2, D.darken + 0.15))
-        .setAlpha(0.5);
+    const key = style === "full" ? btn.colorKey : btn.mutedKey;
+    if (btn.icon.texture.key !== key) {
+      btn.icon.setTexture(key);
+      const size = HUD_LAYOUT.fila2.iconSize;
+      btn.icon.setDisplaySize(size, size);
     }
+    btn.icon.clearTint().setAlpha(1);
   }
 
   private setBadgeMode(
