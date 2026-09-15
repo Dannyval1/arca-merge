@@ -31,7 +31,7 @@ export const SHELL_CONFIG = {
    */
   viteDevUrl: "http://192.168.1.20:5173",
 
-  gameBuildId: "2026-09-14.2311",
+  gameBuildId: "2026-09-14.2336",
 
   staticServerPort: 0 as number,
   stopServerInBackground: false,
@@ -42,7 +42,11 @@ export const SHELL_CONFIG = {
   /** Links de tienda para “Comparte y gana olivos”. */
   storeUrls: {
     android: "https://play.google.com/store/apps/details?id=com.arcamerge.app",
-    /** Actualizar cuando exista ficha iOS. */
+    /**
+     * App Store: reemplazar id0000000000 por el Apple ID numérico
+     * (App Store Connect → tu app → Información → Apple ID) al publicar iOS.
+     * Hasta entonces el fallback de reseña no abrirá la ficha iOS.
+     */
     ios: "https://apps.apple.com/app/id0000000000"
   },
 
@@ -52,7 +56,7 @@ export const SHELL_CONFIG = {
    * Nunca pongas la secret key aquí.
    */
   revenueCat: {
-    iosApiKey: "",
+    iosApiKey: "appl_YxGnUkbrOUFNJUFrfQKumwAIiCk",
     androidApiKey: "goog_gdhkgEnLrxyBljpiUtWHbLrcakp",
     /** true = stubs aunque haya keys (útil sin productos en Play/App Store). */
     forceStub: false

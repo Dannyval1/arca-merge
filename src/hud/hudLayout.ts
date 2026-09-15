@@ -704,6 +704,26 @@ export const HUD_LAYOUT = {
     statusY: 160
   },
 
+  /**
+   * Pre-prompt reseña: ¿Te gusta? Sí → StoreKit / Play In-App Review.
+   * Encima del Game Over / share (depth > shareReward).
+   */
+  reviewPrompt: {
+    depth: 56,
+    panelY: 400,
+    frame: { w: 318, h: 380 },
+    header: { y: -170, w: 248, h: 62 },
+    title: { y: -172, fontSize: 18 },
+    bodyY: -80,
+    bodyFont: 16,
+    bodyWrap: 240,
+    yesY: 20,
+    noY: 100,
+    btnW: 200,
+    btnH: 56,
+    btnFont: 18
+  },
+
   /** Stub de rewarded ad (3-2-1) hasta AdMob. */
   adCountdown: {
     depth: 98,

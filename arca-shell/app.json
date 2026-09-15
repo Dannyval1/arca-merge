@@ -21,8 +21,11 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.arcamerge.app",
+      "buildNumber": "1",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true,
+        "ITSAppUsesNonExemptEncryption": false,
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait"
         ],

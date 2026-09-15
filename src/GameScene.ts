@@ -14,7 +14,7 @@ import {
   requestInterstitialAd,
   onAppLifecycle
 } from "./bridge";
-import { bumpGamesPlayed, maybeRequestReviewAfterNewBest } from "./reviewGate";
+import { bumpGamesPlayed, canShowReviewPrompt, markReviewPromptShown, requestNativeStoreReview } from "./reviewGate";
 import { ENABLE_GAME_DEBUG } from "./buildFlags";
 import {
   JuiceManager,
@@ -39,6 +39,7 @@ import { GameOverModal } from "./hud/GameOverModal";
 import { ContinueModal } from "./hud/ContinueModal";
 import { t } from "./powers/locale";
 import { ShareRewardModal } from "./hud/ShareRewardModal";
+import { ReviewPromptModal } from "./hud/ReviewPromptModal";
 import {
   markShareOfferShown,
   shouldOfferShareReward,
@@ -187,6 +188,7 @@ export class GameScene extends Phaser.Scene {
   private gameOverModal!: GameOverModal;
   private continueModal!: ContinueModal;
   private shareRewardModal!: ShareRewardModal;
+  private reviewPromptModal!: ReviewPromptModal;
 
   private canDrop = true;
   private isOver = false;
@@ -454,15 +456,25 @@ export class GameScene extends Phaser.Scene {
       onEndRun: () => this.finalizeGameOver({ showInterstitial: false })
     });
     this.shareRewardModal = new ShareRewardModal(this, this.renderScale);
+    this.reviewPromptModal = new ReviewPromptModal(this, this.renderScale);
   }
 
   /** Fuera del pointerup del botón: si restart() corre en el mismo tap, Phaser se queda colgado. */
   private leaveGameOver(next: "restart" | "home"): void {
-    // Reseña DESPUÉS de cerrar el modal (no encima).
+    void this.leaveGameOverAsync(next);
+  }
+
+  private async leaveGameOverAsync(next: "restart" | "home"): Promise<void> {
+    // Reseña DESPUÉS de cerrar el modal GO (pre-prompt → nativo Play/App Store).
     if (this.pendingReviewAfterGo) {
       this.pendingReviewAfterGo = false;
-      maybeRequestReviewAfterNewBest();
+      if (canShowReviewPrompt()) {
+        markReviewPromptShown();
+        const liked = await this.reviewPromptModal.showAndWait();
+        if (liked === "yes") requestNativeStoreReview("new_best");
+      }
     }
+    if (!this.sys.isActive()) return;
     if (next === "restart") this.restartRun();
     else this.goHome();
   }
@@ -1193,6 +1205,7 @@ export class GameScene extends Phaser.Scene {
     this.continueModal?.destroy();
     this.gameOverModal?.destroy();
     this.shareRewardModal?.destroy();
+    this.reviewPromptModal?.destroy();
     this.powers.destroy();
     this.juice.destroy();
     this.loader?.destroy();
